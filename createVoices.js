@@ -15,40 +15,68 @@ var fundamental = 100;
 var harmonics = [];
 var mode = 0;
 
+var deferUpdates = 0;
+var deferredParams = {
+  fundamental: null,
+  harmonics: null,
+  frequencies: null,
+  asr: {
+    attack: null,
+    release: null,
+    sustain: null,
+    pan: null,
+    curve: null
+  }
+};
+
+function set_defer(val) {
+  deferUpdates = val;
+}
+
 function set_mode(val) {
   mode = val;
 }
 
 function set_fundamental(val) {
-  fundamental = val;
-  if (mode == 0) {
-    updateFrequenciesFromHarmonics();
-  };
-  // if in mode 2, set_frequencies is sent from UI
+  if (deferUpdates) {
+    deferredParams.fundamental = val;
+  } else {
+    fundamental = val;
+    if (mode == 0) {
+      updateFrequenciesFromHarmonics();
+    }
+  }
 }
 
 function set_harmonics() {
-  harmonics = arrayfromargs(arguments);
-  updateFrequenciesFromHarmonics();
+  if (deferUpdates) {
+    deferredParams.harmonics = arrayfromargs(arguments);
+  } else {
+    harmonics = arrayfromargs(arguments);
+    updateFrequenciesFromHarmonics();
+  }
+}
+
+function set_frequencies() { // mode 2 - sets freqs directly
+  if (deferUpdates) {
+    deferredParams.frequencies = arrayfromargs(arguments);
+  } else {
+    var frequencies = arrayfromargs(arguments);
+    for (var i = 0; i < voices.length; i++) {
+      var freq = frequencies[i] || 440;
+      voices[i].freq = freq;
+      voices[i].cycle.message("frequency", freq);
+    }
+  }
 }
 
 function updateFrequenciesFromHarmonics() {
   for (var i = 0; i < voices.length; i++) {
     var freq = fundamental * (harmonics[i] || 1);
     voices[i].freq = freq;
-    voices[i].cycle.message("frequency", freq);  // might be frequency or number or float
+    voices[i].cycle.message("frequency", freq);
   }
 }
-
-function set_frequencies() { // mode 2 - sets freqs directly
-  frequencies = arrayfromargs(arguments);
-  for (var i = 0; i < voices.length; i++) {
-    var freq = frequencies[i] || 440;
-    voices[i].freq = freq;
-    voices[i].cycle.message("frequency", freq);  // might be frequency or number or float
-  }
-}
-
 
 function clearVoices() {
   for (var i = 0; i < createdObjects.length; i++) {
@@ -89,7 +117,6 @@ function createVoices(n) {
     this.patcher.connect(gain, 0, panL, 0);
     this.patcher.connect(gain, 0, panR, 0);
 
-    // Left sum chain
     if (sumL === null) {
       sumL = panL;
     } else {
@@ -100,11 +127,10 @@ function createVoices(n) {
       sumL = newSumL;
     }
 
-    // Right sum chain
     if (sumR === null) {
       sumR = panR;
     } else {
-      var newSumR = this.patcher.newdefault(x + 360, y+150, "+~");
+      var newSumR = this.patcher.newdefault(x + 360, y + 150, "+~");
       this.patcher.connect(sumR, 0, newSumR, 0);
       this.patcher.connect(panR, 0, newSumR, 1);
       createdObjects.push(newSumR);
@@ -123,24 +149,52 @@ function createVoices(n) {
     y += spacing;
   }
 
-  // Connect final sums to outlets
   if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
   if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
 }
 
-// Parameter setters
-function attack() { asr.attack = arrayfromargs(arguments); }
-function release() { asr.release = arrayfromargs(arguments); }
-function sustain() { asr.sustain = arrayfromargs(arguments); }
-function pan() { asr.pan = arrayfromargs(arguments); }
-function curve() {asr.curve = arrayfromargs(arguments);}
-function set_totalDuration(val) {totalDuration = val};
+function attack() {
+  if (deferUpdates) {
+    deferredParams.asr.attack = arrayfromargs(arguments);
+  } else {
+    asr.attack = arrayfromargs(arguments);
+  }
+}
+function release() {
+  if (deferUpdates) {
+    deferredParams.asr.release = arrayfromargs(arguments);
+  } else {
+    asr.release = arrayfromargs(arguments);
+  }
+}
+function sustain() {
+  if (deferUpdates) {
+    deferredParams.asr.sustain = arrayfromargs(arguments);
+  } else {
+    asr.sustain = arrayfromargs(arguments);
+  }
+}
+function pan() {
+  if (deferUpdates) {
+    deferredParams.asr.pan = arrayfromargs(arguments);
+  } else {
+    asr.pan = arrayfromargs(arguments);
+  }
+}
+function curve() {
+  if (deferUpdates) {
+    deferredParams.asr.curve = arrayfromargs(arguments);
+  } else {
+    asr.curve = arrayfromargs(arguments);
+  }
+}
+function set_totalDuration(val) {
+  totalDuration = val;
+}
 
-var totalDuration = 1000; // default value in ms
-
+var totalDuration = 1000;
 
 function bang() {
-
   var adjustedSustains = normalizeSustain(asr.sustain);
 
   for (var i = 0; i < voices.length; i++) {
@@ -149,71 +203,86 @@ function bang() {
     var aNorm = (asr.attack[i] !== undefined) ? asr.attack[i] : 0.2;
     var rNorm = (asr.release[i] !== undefined) ? asr.release[i] : 0.8;
 
-    var a = Math.min(Math.max(aNorm, 0), 1) * totalDuration;
+    var minAttack = 10;
+    var a = Math.max(minAttack, Math.min(Math.max(aNorm, 0), 1) * totalDuration);
+
+    var minRelease = 5;
     var r = Math.min(Math.max(rNorm, 0), 1) * totalDuration;
+    r = Math.max(r, minRelease);
     var s = adjustedSustains[i] || 0.5;
 
-    // Log diagnostic info
-    var sustainSum = asr.sustain.reduce(function (acc, val) {
-      return acc + (val || 0);
-    }, 0);
-    var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
-
-    // enforce a < r
     if (a >= r) {
-      r = a + 1; // 1 ms minimum duration between points
+      r = a + minRelease;
       if (r > totalDuration) r = totalDuration;
     }
 
     var curveVal = asr.curve[i] || 0;
 
-    var seg1 = a;         // from 0 to attack time
-    var seg2 = r - a;     // from attack to release
-    var seg3 = totalDuration - r; // from release to end
+    var seg1 = Math.max(a, 1);
+    var seg2 = Math.max(r - a, 1);
+    var seg3 = Math.max(totalDuration - r, 1);
 
     if (s <= 0) {
-      // Silent envelope: flat zero for full duration
       var msg = [0, totalDuration, 0];
-      // Also mute panning gains
       v.panL.message("float", 0);
       v.panR.message("float", 0);
     } else {
-      // Normal 3-segment envelope
+      var endCurve = curveVal * -1 || -0.5;
       var msg = [
         s, seg1, curveVal,
         s, seg2, 0,
-        0, seg3, curveVal * -1
+        0, seg3, endCurve
       ];
+
+      v.env.message("list", msg);
+
+      var pan = asr.pan[i] || 0;
+      var angle = (pan + 1) * 0.25 * Math.PI;
+      var gainL = Math.cos(angle);
+      var gainR = Math.sin(angle);
+
+      v.panL.message("float", gainL);
+      v.panR.message("float", gainR);
+    }
+  }
+
+  // ✅ Apply deferred parameter changes here
+  if (deferUpdates) {
+    if (deferredParams.fundamental !== null) {
+      fundamental = deferredParams.fundamental;
+      if (mode == 0) updateFrequenciesFromHarmonics();
+      deferredParams.fundamental = null;
     }
 
-    var total = seg1 + seg2 + seg3;
-    //post("[" + seg1 + "," + seg2 + "," + seg3 + "] = " + total + "\n");
-    //post("msg:" + msg + "\n");
+    if (deferredParams.harmonics !== null) {
+      harmonics = deferredParams.harmonics;
+      updateFrequenciesFromHarmonics();
+      deferredParams.harmonics = null;
+    }
 
-    v.env.message("list", msg);
+    if (deferredParams.frequencies !== null) {
+      var frequencies = deferredParams.frequencies;
+      for (var i = 0; i < voices.length; i++) {
+        var freq = frequencies[i] || 440;
+        voices[i].freq = freq;
+        voices[i].cycle.message("frequency", freq);
+      }
+      deferredParams.frequencies = null;
+    }
 
-    // Pan calculation
-    var pan = asr.pan[i] || 0;
-    var angle = (pan + 1) * 0.25 * Math.PI; // back to 0.25
-    var gainL = Math.cos(angle);
-    var gainR = Math.sin(angle);
-
-    v.panL.message("float", gainL);
-    v.panR.message("float", gainR);
-
-
-
+    for (var param in deferredParams.asr) {
+      if (deferredParams.asr[param] !== null) {
+        asr[param] = deferredParams.asr[param];
+        deferredParams.asr[param] = null;
+      }
+    }
   }
 }
 
-
 function normalizeSustain(sustainValues) {
-  // Normalize sustain values with perceptual scaling
-
   var sustainSum = 0;
   var nonzeroCount = 0;
 
-  // Total up the sustain values
   for (var i = 0; i < sustainValues.length; i++) {
     var val = sustainValues[i];
     sustainSum += val;
@@ -221,22 +290,14 @@ function normalizeSustain(sustainValues) {
   }
 
   var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
-
-  // Only scale down if we're above 1
   var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
-
-  // To preserve perceptual level, compensate back up by the average
   var compensation = (average > 0) ? average : 1;
 
-  // Calculate adjusted sustain values
-  var adjusted = sustainValues.map(function(val) {
+  return sustainValues.map(function(val) {
     return val === 0 ? 0 : (val * scale * compensation);
   });
-
-  return adjusted;
 }
 
-// Debug
 function debug_me() {
   post("🔍 Debug Info:\n");
   post("Fundamental: " + fundamental + "\n");
