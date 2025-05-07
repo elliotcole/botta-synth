@@ -7,12 +7,10 @@ var fundamental = 100;
 var harmonics = [];
 var pans = [];
 var mode = 0;
-var sustains = [];
 var totalDuration = 1000;
 
 
 function pan() { pans = arrayfromargs(arguments); }
-function sustain() { sustains = arrayfromargs(arguments); }
 
 
 var deferUpdates = 0;
@@ -151,45 +149,134 @@ function set_totalDuration(val) {
   totalDuration = val;
 }
 
+// Global variables
+var collectedCurveData = [];
+var allSustainValues = [];
 
-
+// Main envelope function
 function envelope() {
-  var args = arrayfromargs(arguments);
-  var voiceIndex = args[0];
-  var curveData = args.slice(1);
+    var args = arrayfromargs(arguments);
+    var voiceIndex = args[0];
+    var curveData = args.slice(1);
 
-  if (voiceIndex < voices.length) {
-    var v = voices[voiceIndex];
-    if (v && v.env && v.env.valid) {
-      // send panning to that voice
-      var pan = pans[voiceIndex] || 0;
-      var angle = (pan + 1) * 0.25 * Math.PI;
-      v.panL.message("float", Math.cos(angle));
-      v.panR.message("float", Math.sin(angle));
+    // Collect curveData
+    collectedCurveData.push(curveData);
 
-      var timeScaledCurveData = applyTimeScaleToCurveData.apply(this, curveData); // spread the array is necessary
+    // If this is the last voice, start processing
+    if (collectedCurveData.length === voices.length) {
+        post("All curveData collected. Beginning processing...\n");
+        
+        collectAllSustainValues();
+        processVoices();
 
-      // send envelope to that voice
-      v.env.message("list", timeScaledCurveData);
-      post("voice " + voiceIndex + " got timeScaledCurveData " + timeScaledCurveData + "\n");
-
-    } else {
-      post("Invalid envelope target for voice", voiceIndex, "\n");
+        // Clear for next cycle
+        collectedCurveData = [];
+        allSustainValues = [];
     }
-  } else {
-    post("Voice index", voiceIndex, "out of range\n")
-  }
 }
+
+// Step 1: Extract all y values for global sustain adjustment
+function collectAllSustainValues() {
+    collectedCurveData.forEach(function(data) {
+        for (var i = 0; i < data.length; i += 3) {
+            allSustainValues.push(data[i]);
+        }
+    });
+}
+
+// Step 2: Process each voice
+function processVoices() {
+    for (var vIndex = 0; vIndex < voices.length; vIndex++) {
+        var v = voices[vIndex];
+        var originalCurveData = collectedCurveData[vIndex];
+
+        if (v && v.env && v.env.valid) {
+            var separatedLists = separateLists(originalCurveData);
+
+            // Apply transformations
+            var scaledYList = adjustSustain(separatedLists.yList);
+            var scaledXList = applyTimeScaleToCurveData.apply(this, separatedLists.xList);
+
+            // Recombine 
+            var processedCurveData = recombineLists(scaledYList, scaledXList, separatedLists.cList);
+            
+            // === Calculate and send panning ===
+            var pan = pans[vIndex] || 0;
+            var angle = (pan + 1) * 0.25 * Math.PI;
+            v.panL.message("float", Math.cos(angle));
+            v.panR.message("float", Math.sin(angle));
+            post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
+
+            // 
+            v.env.message("list", processedCurveData);
+            post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
+
+                    } else {
+            post("Invalid envelope target for voice", vIndex, "\n");
+        }
+    }
+}
+
+// Step 3: Separate lists into y, x, and c components
+function separateLists(originalCurveData) {
+    var yList = [];
+    var xList = [];
+    var cList = [];
+
+    for (var j = 0; j < originalCurveData.length; j += 3) {
+        yList.push(originalCurveData[j]);
+        xList.push(originalCurveData[j + 1]);
+        cList.push(originalCurveData[j + 2]);
+    }
+
+    return { yList: yList, xList: xList, cList: cList };
+}
+
+// Step 4: Recombine processed lists
+function recombineLists(yList, xList, cList) {
+    var processedCurveData = [];
+    for (var k = 0; k < yList.length; k++) {
+        processedCurveData.push(yList[k], xList[k], cList[k]);
+    }
+    return processedCurveData;
+}
+
+// adjustSustain function (ES5 compatible)
+function adjustSustain(sustainValues) {
+    var sustainSum = 0;
+    for (var i = 0; i < allSustainValues.length; i++) {
+        sustainSum += allSustainValues[i];
+    }
+
+    var nonzeroValues = [];
+    for (var j = 0; j < allSustainValues.length; j++) {
+        if (allSustainValues[j] > 0) {
+            nonzeroValues.push(allSustainValues[j]);
+        }
+    }
+    
+    var nonzeroCount = nonzeroValues.length;
+    var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
+
+    var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
+    var compensation = (average > 0) ? average : 1;
+
+    var adjustedValues = [];
+    for (var k = 0; k < sustainValues.length; k++) {
+        adjustedValues.push(sustainValues[k] === 0 ? 0 : (sustainValues[k] * scale * compensation));
+    }
+    return adjustedValues;
+}
+
 
 function applyTimeScaleToCurveData() {
   var curveData = arrayfromargs(arguments);
-  post("curveData: " + curveData + "\n");
+  post("durations within 1.0: " + curveData + "\n");
   post("totalDuration: " + totalDuration + "\n");
 
   var timeScaledCurveData = [];
 
   for (var i = 0; i < curveData.length; i++) {
-    if (i % 3 === 1) {
       var scaledValue = curveData[i] * totalDuration;
       post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
 
@@ -198,31 +285,8 @@ function applyTimeScaleToCurveData() {
       }
 
       timeScaledCurveData.push(scaledValue);
-    } else {
-      timeScaledCurveData.push(curveData[i]);
     }
-  }
   return timeScaledCurveData;
-}
-
-
-function normalizeSustain(sustainValues) {
-  var sustainSum = 0;
-  var nonzeroCount = 0;
-
-  for (var i = 0; i < sustainValues.length; i++) {
-    var val = sustainValues[i];
-    sustainSum += val;
-    if (val > 0) nonzeroCount++;
-  }
-
-  var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
-  var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
-  var compensation = (average > 0) ? average : 1;
-
-  return sustainValues.map(function(val) {
-    return val === 0 ? 0 : (val * scale * compensation);
-  });
 }
 
 function debug_me() {
