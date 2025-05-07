@@ -3,30 +3,23 @@ autowatch = 1;
 var voices = [];
 var createdObjects = []; // stores *all* created patcher objects
 
-var asr = {
-  attack: [],
-  release: [],
-  sustain: [],
-  pan: [],
-  curve: []
-};
-
 var fundamental = 100;
 var harmonics = [];
+var pans = [];
 var mode = 0;
+var sustains = [];
+var totalDuration = 1000;
+
+
+function pan() { pans = arrayfromargs(arguments); }
+function sustain() { sustains = arrayfromargs(arguments); }
+
 
 var deferUpdates = 0;
 var deferredParams = {
   fundamental: null,
   harmonics: null,
   frequencies: null,
-  asr: {
-    attack: null,
-    release: null,
-    sustain: null,
-    pan: null,
-    curve: null
-  }
 };
 
 function set_defer(val) {
@@ -153,131 +146,65 @@ function createVoices(n) {
   if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
 }
 
-function attack() {
-  if (deferUpdates) {
-    deferredParams.asr.attack = arrayfromargs(arguments);
-  } else {
-    asr.attack = arrayfromargs(arguments);
-  }
-}
-function release() {
-  if (deferUpdates) {
-    deferredParams.asr.release = arrayfromargs(arguments);
-  } else {
-    asr.release = arrayfromargs(arguments);
-  }
-}
-function sustain() {
-  if (deferUpdates) {
-    deferredParams.asr.sustain = arrayfromargs(arguments);
-  } else {
-    asr.sustain = arrayfromargs(arguments);
-  }
-}
-function pan() {
-  if (deferUpdates) {
-    deferredParams.asr.pan = arrayfromargs(arguments);
-  } else {
-    asr.pan = arrayfromargs(arguments);
-  }
-}
-function curve() {
-  if (deferUpdates) {
-    deferredParams.asr.curve = arrayfromargs(arguments);
-  } else {
-    asr.curve = arrayfromargs(arguments);
-  }
-}
+
 function set_totalDuration(val) {
   totalDuration = val;
 }
 
-var totalDuration = 1000;
 
-function bang() {
-  var adjustedSustains = normalizeSustain(asr.sustain);
 
-  for (var i = 0; i < voices.length; i++) {
-    var v = voices[i];
+function envelope() {
+  var args = arrayfromargs(arguments);
+  var voiceIndex = args[0];
+  var curveData = args.slice(1);
 
-    var aNorm = (asr.attack[i] !== undefined) ? asr.attack[i] : 0.2;
-    var rNorm = (asr.release[i] !== undefined) ? asr.release[i] : 0.8;
-
-    var minAttack = 10;
-    var a = Math.max(minAttack, Math.min(Math.max(aNorm, 0), 1) * totalDuration);
-
-    var minRelease = 5;
-    var r = Math.min(Math.max(rNorm, 0), 1) * totalDuration;
-    r = Math.max(r, minRelease);
-    var s = adjustedSustains[i] || 0.5;
-
-    if (a >= r) {
-      r = a + minRelease;
-      if (r > totalDuration) r = totalDuration;
-    }
-
-    var curveVal = asr.curve[i] || 0;
-
-    var seg1 = Math.max(a, 1);
-    var seg2 = Math.max(r - a, 1);
-    var seg3 = Math.max(totalDuration - r, 1);
-
-    if (s <= 0) {
-      var msg = [0, totalDuration, 0];
-      v.panL.message("float", 0);
-      v.panR.message("float", 0);
-    } else {
-      var endCurve = curveVal * -1 || -0.5;
-      var msg = [
-        s, seg1, curveVal,
-        s, seg2, 0,
-        0, seg3, endCurve
-      ];
-
-      v.env.message("list", msg);
-
-      var pan = asr.pan[i] || 0;
+  if (voiceIndex < voices.length) {
+    var v = voices[voiceIndex];
+    if (v && v.env && v.env.valid) {
+      // send panning to that voice
+      var pan = pans[voiceIndex] || 0;
       var angle = (pan + 1) * 0.25 * Math.PI;
-      var gainL = Math.cos(angle);
-      var gainR = Math.sin(angle);
+      v.panL.message("float", Math.cos(angle));
+      v.panR.message("float", Math.sin(angle));
 
-      v.panL.message("float", gainL);
-      v.panR.message("float", gainR);
-    }
-  }
+      var timeScaledCurveData = applyTimeScaleToCurveData.apply(this, curveData); // spread the array is necessary
 
-  // ✅ Apply deferred parameter changes here
-  if (deferUpdates) {
-    if (deferredParams.fundamental !== null) {
-      fundamental = deferredParams.fundamental;
-      if (mode == 0) updateFrequenciesFromHarmonics();
-      deferredParams.fundamental = null;
-    }
+      // send envelope to that voice
+      v.env.message("list", timeScaledCurveData);
+      post("voice " + voiceIndex + " got timeScaledCurveData " + timeScaledCurveData + "\n");
 
-    if (deferredParams.harmonics !== null) {
-      harmonics = deferredParams.harmonics;
-      updateFrequenciesFromHarmonics();
-      deferredParams.harmonics = null;
+    } else {
+      post("Invalid envelope target for voice", voiceIndex, "\n");
     }
-
-    if (deferredParams.frequencies !== null) {
-      var frequencies = deferredParams.frequencies;
-      for (var i = 0; i < voices.length; i++) {
-        var freq = frequencies[i] || 440;
-        voices[i].freq = freq;
-        voices[i].cycle.message("frequency", freq);
-      }
-      deferredParams.frequencies = null;
-    }
-
-    for (var param in deferredParams.asr) {
-      if (deferredParams.asr[param] !== null) {
-        asr[param] = deferredParams.asr[param];
-        deferredParams.asr[param] = null;
-      }
-    }
+  } else {
+    post("Voice index", voiceIndex, "out of range\n")
   }
 }
+
+function applyTimeScaleToCurveData() {
+  var curveData = arrayfromargs(arguments);
+  post("curveData: " + curveData + "\n");
+  post("totalDuration: " + totalDuration + "\n");
+
+  var timeScaledCurveData = [];
+
+  for (var i = 0; i < curveData.length; i++) {
+    if (i % 3 === 1) {
+      var scaledValue = curveData[i] * totalDuration;
+      post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
+
+      if (isNaN(scaledValue)) {
+        post("ERROR: Encountered NaN value at index " + i + "\n");
+      }
+
+      timeScaledCurveData.push(scaledValue);
+    } else {
+      timeScaledCurveData.push(curveData[i]);
+    }
+  }
+  return timeScaledCurveData;
+}
+
 
 function normalizeSustain(sustainValues) {
   var sustainSum = 0;
@@ -302,10 +229,6 @@ function debug_me() {
   post("🔍 Debug Info:\n");
   post("Fundamental: " + fundamental + "\n");
   post("Harmonics: " + harmonics + "\n");
-  post("Attack: " + asr.attack + "\n");
-  post("Release: " + asr.release + "\n");
-  post("Sustain: " + asr.sustain + "\n");
-  post("Curve: " + asr.curve + "\n");
   post("Total Duration: " + totalDuration + "\n");
   post("Pan: " + asr.pan + "\n");
   post("Voices count: " + voices.length + "\n");

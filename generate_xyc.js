@@ -8,9 +8,14 @@ var attackVals = [];
 var sustainVals = [];
 var releaseVals = [];
 var curveVals = [];
+var displayChannel = 1;
 
 function chans(n) {
     numChannels = n;
+}
+
+function displayChan(n) {
+  displayChannel = n;
 }
 
 function attack() {
@@ -56,6 +61,7 @@ function update() {
         outlet(0, ["target", i + 1]);
         outlet(0, ["xyc", 1.0, 0, cur*-1]);
     }
+    outlet(0, ["displaychan"], displayChannel)
 }
 
 function clearAll() {
@@ -79,4 +85,3 @@ function debug_me() {
     }
     post("====================\n");
 }
-
