@@ -10,9 +10,6 @@ var mode = 0;
 var totalDuration = 1000;
 
 
-function pan() { pans = arrayfromargs(arguments); }
-
-
 var deferUpdates = 0;
 var deferredParams = {
   fundamental: null,
@@ -27,6 +24,8 @@ function set_defer(val) {
 function set_mode(val) {
   mode = val;
 }
+
+function pan() { pans = arrayfromargs(arguments); }
 
 function set_fundamental(val) {
   if (deferUpdates) {
@@ -92,6 +91,10 @@ function createVoices(n) {
   var sumL = null;
   var sumR = null;
 
+  // Counter to track curve~ completions
+  var completionCounter = 0;
+  var completionTriggers = [];
+
   for (var i = 0; i < n; i++) {
     var freq = fundamental * (harmonics[i] || 1);
 
@@ -107,6 +110,17 @@ function createVoices(n) {
     this.patcher.connect(env, 0, gain, 1);
     this.patcher.connect(gain, 0, panL, 0);
     this.patcher.connect(gain, 0, panR, 0);
+
+    // Track the number of curve~ objects
+    completionCounter++;
+
+    // Create trigger for each curve~ completion
+    var completionTrigger = this.patcher.newdefault(x + 240, y + 20, "t", "bang");
+    createdObjects.push(completionTrigger);
+    this.patcher.connect(env, 1, completionTrigger, 0);
+
+    // Store the trigger for later
+    completionTriggers.push(completionTrigger);
 
     if (sumL === null) {
       sumL = panL;
@@ -142,7 +156,24 @@ function createVoices(n) {
 
   if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
   if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
+
+  // Create a [uzi] object to collect bangs from all curve~ objects
+  var uzi = this.patcher.newdefault(x + 180, y + 400, "uzi", completionCounter);
+  createdObjects.push(uzi);
+
+  // Connect each trigger to uzi
+  for (var j = 0; j < completionTriggers.length; j++) {
+    this.patcher.connect(completionTriggers[j], 0, uzi, 0);
+  }
+
+  // Connect the final bang to the named outlet "bang_when_complete"
+  var bangOutlet = this.patcher.getnamed("bang_when_complete");
+  if (bangOutlet) {
+    this.patcher.connect(uzi, 0, bangOutlet, 0);
+  }
 }
+
+
 
 
 function set_totalDuration(val) {
@@ -165,7 +196,7 @@ function envelope() {
     // If this is the last voice, start processing
     if (collectedCurveData.length === voices.length) {
         post("All curveData collected. Beginning processing...\n");
-        
+
         collectAllSustainValues();
         processVoices();
 
@@ -197,19 +228,19 @@ function processVoices() {
             var scaledYList = adjustSustain(separatedLists.yList);
             var scaledXList = applyTimeScaleToCurveData.apply(this, separatedLists.xList);
 
-            // Recombine 
+            // Recombine
             var processedCurveData = recombineLists(scaledYList, scaledXList, separatedLists.cList);
-            
+
             // === Calculate and send panning ===
             var pan = pans[vIndex] || 0;
             var angle = (pan + 1) * 0.25 * Math.PI;
             v.panL.message("float", Math.cos(angle));
             v.panR.message("float", Math.sin(angle));
-            post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
+            //post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
 
-            // 
+            //
             v.env.message("list", processedCurveData);
-            post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
+            //post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
 
                     } else {
             post("Invalid envelope target for voice", vIndex, "\n");
@@ -254,7 +285,7 @@ function adjustSustain(sustainValues) {
             nonzeroValues.push(allSustainValues[j]);
         }
     }
-    
+
     var nonzeroCount = nonzeroValues.length;
     var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
 
@@ -271,14 +302,14 @@ function adjustSustain(sustainValues) {
 
 function applyTimeScaleToCurveData() {
   var curveData = arrayfromargs(arguments);
-  post("durations within 1.0: " + curveData + "\n");
-  post("totalDuration: " + totalDuration + "\n");
+  //post("durations within 1.0: " + curveData + "\n");
+  //post("totalDuration: " + totalDuration + "\n");
 
   var timeScaledCurveData = [];
 
   for (var i = 0; i < curveData.length; i++) {
       var scaledValue = curveData[i] * totalDuration;
-      post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
+      //post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
 
       if (isNaN(scaledValue)) {
         post("ERROR: Encountered NaN value at index " + i + "\n");
@@ -294,7 +325,7 @@ function debug_me() {
   post("Fundamental: " + fundamental + "\n");
   post("Harmonics: " + harmonics + "\n");
   post("Total Duration: " + totalDuration + "\n");
-  post("Pan: " + asr.pan + "\n");
+  post("Pan: " + pans + "\n");
   post("Voices count: " + voices.length + "\n");
   post("Mode: " + mode + "\n");
 
