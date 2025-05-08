@@ -5,16 +5,16 @@ outlets = 2;
 
 // Define mapping: numeric output and human-readable string
 var mapping = {
-	"-4": { value: 0.0625, label: "1/16" },
-	"-3": { value: 0.125, label: "1/8" },
-    "-2": { value: 0.25, label: "1/4" },
-    "-1": { value: 0.5,  label: "1/2" },
-     "0": { value: 1,    label: "1/1" },
-     "1": { value: 2,    label: "2/1" },
-     "2": { value: 4,    label: "4/1" },
-		 "3": { value: 8,    label: "4/1" },
-		 "4": { value: 16,    label: "4/1" }
-
+	"-9": { value: 19, label: "/19" },
+	"-8": { value: 17, label: "/17" },
+	"-7": { value: 15, label: "/15" },
+	"-6": { value: 13, label: "/13" },
+	"-5": { value: 11, label: "/11" },
+	"-4": { value: 9, label: "/9" },
+	"-3": { value: 7, label: "/7" },
+  "-2": { value: 5, label: "/5" },
+  "-1": { value: 3,  label: "/3" },
+	"0": { value: 1,    label: "/1" },
 };
 
 // Respond to a list (e.g., from multislider)

@@ -17,6 +17,27 @@ var deferredParams = {
   frequencies: null,
 };
 
+function hard_reset() {
+  var patcher = this.patcher;
+  var path = patcher.filepath;
+
+  post("resetting " + patcher + "\n");
+  post("loading from " + path + "\n");
+  if (path) {
+      post("Reloading abstraction from: " + path + "\n");
+
+      // This sends an "open" message to force a refresh
+      patcher.parentpatcher.message("script", "sendbox", patcher.varname, "open", path);
+
+      // Close it immediately (it will still be reloaded)
+      patcher.parentpatcher.message("script", "sendbox", patcher.varname, "close");
+  } else {
+      post("Failed to reload: abstraction not saved to disk.\n");
+  }
+
+
+}
+
 function set_defer(val) {
   deferUpdates = val;
 }
@@ -82,94 +103,98 @@ var outletL = this.patcher.getnamed("outlet_left");
 var outletR = this.patcher.getnamed("outlet_right");
 
 function createVoices(n) {
-  clearVoices();
+  if (voices.length != n) { // don't re-create voices if you don't have to
+    post("re-building synth with " + n + " voices");
+    clearVoices();
 
-  var x = 50;
-  var y = 50;
-  var spacing = 200;
+    var x = 50;
+    var y = 50;
+    var spacing = 200;
 
-  var sumL = null;
-  var sumR = null;
+    var sumL = null;
+    var sumR = null;
 
-  // Counter to track curve~ completions
-  var completionCounter = 0;
-  var completionTriggers = [];
+    // Counter to track curve~ completions
+    var completionCounter = 0;
+    var completionTriggers = [];
 
-  for (var i = 0; i < n; i++) {
-    var freq = fundamental * (harmonics[i] || 1);
+    for (var i = 0; i < n; i++) {
+      var freq = fundamental * (harmonics[i] || 1);
 
-    var cycle = this.patcher.newdefault(x + 60, y, "cycle~", freq);
-    var gain = this.patcher.newdefault(x + 60, y + 40, "*~");
-    var env = this.patcher.newdefault(x + 200, y, "curve~");
-    var panL = this.patcher.newdefault(x + 60, y + 80, "*~");
-    var panR = this.patcher.newdefault(x + 360, y + 80, "*~");
+      var cycle = this.patcher.newdefault(x + 60, y, "cycle~", freq);
+      var gain = this.patcher.newdefault(x + 60, y + 40, "*~");
+      var env = this.patcher.newdefault(x + 200, y, "curve~");
+      var panL = this.patcher.newdefault(x + 60, y + 80, "*~");
+      var panR = this.patcher.newdefault(x + 360, y + 80, "*~");
 
-    createdObjects.push(cycle, gain, env, panL, panR);
+      createdObjects.push(cycle, gain, env, panL, panR);
 
-    this.patcher.connect(cycle, 0, gain, 0);
-    this.patcher.connect(env, 0, gain, 1);
-    this.patcher.connect(gain, 0, panL, 0);
-    this.patcher.connect(gain, 0, panR, 0);
+      this.patcher.connect(cycle, 0, gain, 0);
+      this.patcher.connect(env, 0, gain, 1);
+      this.patcher.connect(gain, 0, panL, 0);
+      this.patcher.connect(gain, 0, panR, 0);
 
-    // Track the number of curve~ objects
-    completionCounter++;
+      // Track the number of curve~ objects
+      completionCounter++;
 
-    // Create trigger for each curve~ completion
-    var completionTrigger = this.patcher.newdefault(x + 240, y + 20, "t", "bang");
-    createdObjects.push(completionTrigger);
-    this.patcher.connect(env, 1, completionTrigger, 0);
+      // Create trigger for each curve~ completion
+      var completionTrigger = this.patcher.newdefault(x + 240, y + 20, "t", "bang");
+      createdObjects.push(completionTrigger);
+      this.patcher.connect(env, 1, completionTrigger, 0);
 
-    // Store the trigger for later
-    completionTriggers.push(completionTrigger);
+      // Store the trigger for later
+      completionTriggers.push(completionTrigger);
 
-    if (sumL === null) {
-      sumL = panL;
-    } else {
-      var newSumL = this.patcher.newdefault(x + 5, y + 150, "+~");
-      this.patcher.connect(sumL, 0, newSumL, 0);
-      this.patcher.connect(panL, 0, newSumL, 1);
-      createdObjects.push(newSumL);
-      sumL = newSumL;
+      if (sumL === null) {
+        sumL = panL;
+      } else {
+        var newSumL = this.patcher.newdefault(x + 5, y + 150, "+~");
+        this.patcher.connect(sumL, 0, newSumL, 0);
+        this.patcher.connect(panL, 0, newSumL, 1);
+        createdObjects.push(newSumL);
+        sumL = newSumL;
+      }
+
+      if (sumR === null) {
+        sumR = panR;
+      } else {
+        var newSumR = this.patcher.newdefault(x + 360, y + 150, "+~");
+        this.patcher.connect(sumR, 0, newSumR, 0);
+        this.patcher.connect(panR, 0, newSumR, 1);
+        createdObjects.push(newSumR);
+        sumR = newSumR;
+      }
+
+      voices.push({
+        cycle: cycle,
+        gain: gain,
+        env: env,
+        panL: panL,
+        panR: panR,
+        freq: freq
+      });
+
+      y += spacing;
+
     }
 
-    if (sumR === null) {
-      sumR = panR;
-    } else {
-      var newSumR = this.patcher.newdefault(x + 360, y + 150, "+~");
-      this.patcher.connect(sumR, 0, newSumR, 0);
-      this.patcher.connect(panR, 0, newSumR, 1);
-      createdObjects.push(newSumR);
-      sumR = newSumR;
+    if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
+    if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
+
+    // Create a [uzi] object to collect bangs from all curve~ objects
+    var uzi = this.patcher.newdefault(x + 180, y + 400, "uzi", completionCounter);
+    createdObjects.push(uzi);
+
+    // Connect each trigger to uzi
+    for (var j = 0; j < completionTriggers.length; j++) {
+      this.patcher.connect(completionTriggers[j], 0, uzi, 0);
     }
 
-    voices.push({
-      cycle: cycle,
-      gain: gain,
-      env: env,
-      panL: panL,
-      panR: panR,
-      freq: freq
-    });
-
-    y += spacing;
-  }
-
-  if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
-  if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
-
-  // Create a [uzi] object to collect bangs from all curve~ objects
-  var uzi = this.patcher.newdefault(x + 180, y + 400, "uzi", completionCounter);
-  createdObjects.push(uzi);
-
-  // Connect each trigger to uzi
-  for (var j = 0; j < completionTriggers.length; j++) {
-    this.patcher.connect(completionTriggers[j], 0, uzi, 0);
-  }
-
-  // Connect the final bang to the named outlet "bang_when_complete"
-  var bangOutlet = this.patcher.getnamed("bang_when_complete");
-  if (bangOutlet) {
-    this.patcher.connect(uzi, 0, bangOutlet, 0);
+    // Connect the final bang to the named outlet "bang_when_complete"
+    var bangOutlet = this.patcher.getnamed("bang_when_complete");
+    if (bangOutlet) {
+      this.patcher.connect(uzi, 0, bangOutlet, 0);
+    }
   }
 }
 
@@ -186,117 +211,117 @@ var allSustainValues = [];
 
 // Main envelope function
 function envelope() {
-    var args = arrayfromargs(arguments);
-    var voiceIndex = args[0];
-    var curveData = args.slice(1);
+  var args = arrayfromargs(arguments);
+  var voiceIndex = args[0];
+  var curveData = args.slice(1);
 
-    // Collect curveData
-    collectedCurveData.push(curveData);
+  // Collect curveData
+  collectedCurveData.push(curveData);
 
-    // If this is the last voice, start processing
-    if (collectedCurveData.length === voices.length) {
-        post("All curveData collected. Beginning processing...\n");
+  // If this is the last voice, start processing
+  if (collectedCurveData.length === voices.length) {
+    //post("All curveData collected. Beginning processing...\n");
 
-        collectAllSustainValues();
-        processVoices();
+    collectAllSustainValues();
+    processVoices();
 
-        // Clear for next cycle
-        collectedCurveData = [];
-        allSustainValues = [];
-    }
+    // Clear for next cycle
+    collectedCurveData = [];
+    allSustainValues = [];
+  }
 }
 
 // Step 1: Extract all y values for global sustain adjustment
 function collectAllSustainValues() {
-    collectedCurveData.forEach(function(data) {
-        for (var i = 0; i < data.length; i += 3) {
-            allSustainValues.push(data[i]);
-        }
-    });
+  collectedCurveData.forEach(function(data) {
+    for (var i = 0; i < data.length; i += 3) {
+      allSustainValues.push(data[i]);
+    }
+  });
 }
 
 // Step 2: Process each voice
 function processVoices() {
-    for (var vIndex = 0; vIndex < voices.length; vIndex++) {
-        var v = voices[vIndex];
-        var originalCurveData = collectedCurveData[vIndex];
+  for (var vIndex = 0; vIndex < voices.length; vIndex++) {
+    var v = voices[vIndex];
+    var originalCurveData = collectedCurveData[vIndex];
 
-        if (v && v.env && v.env.valid) {
-            var separatedLists = separateLists(originalCurveData);
+    if (v && v.env && v.env.valid) {
+      var separatedLists = separateLists(originalCurveData);
 
-            // Apply transformations
-            var scaledYList = adjustSustain(separatedLists.yList);
-            var scaledXList = applyTimeScaleToCurveData.apply(this, separatedLists.xList);
+      // Apply transformations
+      var scaledYList = adjustSustain(separatedLists.yList);
+      var scaledXList = applyTimeScaleToCurveData.apply(this, separatedLists.xList);
 
-            // Recombine
-            var processedCurveData = recombineLists(scaledYList, scaledXList, separatedLists.cList);
+      // Recombine
+      var processedCurveData = recombineLists(scaledYList, scaledXList, separatedLists.cList);
 
-            // === Calculate and send panning ===
-            var pan = pans[vIndex] || 0;
-            var angle = (pan + 1) * 0.25 * Math.PI;
-            v.panL.message("float", Math.cos(angle));
-            v.panR.message("float", Math.sin(angle));
-            //post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
+      // === Calculate and send panning ===
+      var pan = pans[vIndex] || 0;
+      var angle = (pan + 1) * 0.25 * Math.PI;
+      v.panL.message("float", Math.cos(angle));
+      v.panR.message("float", Math.sin(angle));
+      //post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
 
-            //
-            v.env.message("list", processedCurveData);
-            //post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
+      //
+      v.env.message("list", processedCurveData);
+      //post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
 
-                    } else {
-            post("Invalid envelope target for voice", vIndex, "\n");
-        }
+    } else {
+      post("Invalid envelope target for voice", vIndex, "\n");
     }
+  }
 }
 
 // Step 3: Separate lists into y, x, and c components
 function separateLists(originalCurveData) {
-    var yList = [];
-    var xList = [];
-    var cList = [];
+  var yList = [];
+  var xList = [];
+  var cList = [];
 
-    for (var j = 0; j < originalCurveData.length; j += 3) {
-        yList.push(originalCurveData[j]);
-        xList.push(originalCurveData[j + 1]);
-        cList.push(originalCurveData[j + 2]);
-    }
+  for (var j = 0; j < originalCurveData.length; j += 3) {
+    yList.push(originalCurveData[j]);
+    xList.push(originalCurveData[j + 1]);
+    cList.push(originalCurveData[j + 2]);
+  }
 
-    return { yList: yList, xList: xList, cList: cList };
+  return { yList: yList, xList: xList, cList: cList };
 }
 
 // Step 4: Recombine processed lists
 function recombineLists(yList, xList, cList) {
-    var processedCurveData = [];
-    for (var k = 0; k < yList.length; k++) {
-        processedCurveData.push(yList[k], xList[k], cList[k]);
-    }
-    return processedCurveData;
+  var processedCurveData = [];
+  for (var k = 0; k < yList.length; k++) {
+    processedCurveData.push(yList[k], xList[k], cList[k]);
+  }
+  return processedCurveData;
 }
 
 // adjustSustain function (ES5 compatible)
 function adjustSustain(sustainValues) {
-    var sustainSum = 0;
-    for (var i = 0; i < allSustainValues.length; i++) {
-        sustainSum += allSustainValues[i];
+  var sustainSum = 0;
+  for (var i = 0; i < allSustainValues.length; i++) {
+    sustainSum += allSustainValues[i];
+  }
+
+  var nonzeroValues = [];
+  for (var j = 0; j < allSustainValues.length; j++) {
+    if (allSustainValues[j] > 0) {
+      nonzeroValues.push(allSustainValues[j]);
     }
+  }
 
-    var nonzeroValues = [];
-    for (var j = 0; j < allSustainValues.length; j++) {
-        if (allSustainValues[j] > 0) {
-            nonzeroValues.push(allSustainValues[j]);
-        }
-    }
+  var nonzeroCount = nonzeroValues.length;
+  var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
 
-    var nonzeroCount = nonzeroValues.length;
-    var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
+  var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
+  var compensation = (average > 0) ? average : 1;
 
-    var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
-    var compensation = (average > 0) ? average : 1;
-
-    var adjustedValues = [];
-    for (var k = 0; k < sustainValues.length; k++) {
-        adjustedValues.push(sustainValues[k] === 0 ? 0 : (sustainValues[k] * scale * compensation));
-    }
-    return adjustedValues;
+  var adjustedValues = [];
+  for (var k = 0; k < sustainValues.length; k++) {
+    adjustedValues.push(sustainValues[k] === 0 ? 0 : (sustainValues[k] * scale * compensation));
+  }
+  return adjustedValues;
 }
 
 
@@ -308,15 +333,15 @@ function applyTimeScaleToCurveData() {
   var timeScaledCurveData = [];
 
   for (var i = 0; i < curveData.length; i++) {
-      var scaledValue = curveData[i] * totalDuration;
-      //post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
+    var scaledValue = curveData[i] * totalDuration;
+    //post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
 
-      if (isNaN(scaledValue)) {
-        post("ERROR: Encountered NaN value at index " + i + "\n");
-      }
-
-      timeScaledCurveData.push(scaledValue);
+    if (isNaN(scaledValue)) {
+      post("ERROR: Encountered NaN value at index " + i + "\n");
     }
+
+    timeScaledCurveData.push(scaledValue);
+  }
   return timeScaledCurveData;
 }
 
