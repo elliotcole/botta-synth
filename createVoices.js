@@ -17,7 +17,7 @@ var deferredParams = {
   frequencies: null,
 };
 
-function hard_reset() {
+function hard_reset() { // does not work
   var patcher = this.patcher;
   var path = patcher.filepath;
 
@@ -106,6 +106,9 @@ function createVoices(n) {
   if (voices.length != n) { // don't re-create voices if you don't have to
     post("re-building synth with " + n + " voices");
     clearVoices();
+
+    // Reset sustain values when the number of voices changes
+    allSustainValues = [];
 
     var x = 50;
     var y = 50;
@@ -327,14 +330,14 @@ function adjustSustain(sustainValues) {
 
 function applyTimeScaleToCurveData() {
   var curveData = arrayfromargs(arguments);
-  //post("durations within 1.0: " + curveData + "\n");
-  //post("totalDuration: " + totalDuration + "\n");
+
+  if (curveData.some(isNaN)) {
+    post("ERROR: curveData contains NaN values before scaling.\n");
+  }
 
   var timeScaledCurveData = [];
-
   for (var i = 0; i < curveData.length; i++) {
     var scaledValue = curveData[i] * totalDuration;
-    //post("curveData[" + i + "] = " + curveData[i] + ", scaled = " + scaledValue + "\n");
 
     if (isNaN(scaledValue)) {
       post("ERROR: Encountered NaN value at index " + i + "\n");
@@ -344,6 +347,7 @@ function applyTimeScaleToCurveData() {
   }
   return timeScaledCurveData;
 }
+
 
 function debug_me() {
   post("🔍 Debug Info:\n");

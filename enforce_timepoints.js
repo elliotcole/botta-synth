@@ -5,7 +5,10 @@ var time1 = [];
 var time2 = [];
 
 function set_time1() {
-    var incoming = arrayfromargs(arguments).map(parseFloat);
+    var incoming = arrayfromargs(arguments);
+    // Ensure we map correctly to parse floats
+    incoming = incoming.map(function(val) { return parseFloat(val); });
+
     var changed = false;
 
     // Adjust time2 length to match incoming
@@ -37,7 +40,10 @@ function set_time1() {
 }
 
 function set_time2() {
-    var incoming = arrayfromargs(arguments).map(parseFloat);
+    var incoming = arrayfromargs(arguments);
+    // Ensure we map correctly to parse floats
+    incoming = incoming.map(function(val) { return parseFloat(val); });
+
     var changed = false;
 
     // Adjust time1 length to match incoming

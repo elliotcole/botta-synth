@@ -23,6 +23,27 @@ function resizeArray(arr, length, defaultValue) {
   return newArr;
 }
 
+function dumpChannel(n) {
+  if (n < 0 || n >= voices.length) {
+    post("ERROR: Invalid channel index.\n");
+    return;
+  }
+
+  var channelData = voices[n];  // Assuming the voice data is structured this way.
+  if (!channelData || !channelData.curveData) {
+    post("ERROR: No data available for channel " + n + ".\n");
+    return;
+  }
+
+  var points = channelData.curveData;  // Array of [y, x, c] for the channel.
+  for (var i = 0; i < points.length; i++) {
+    var y = points[i][0];
+    var x = points[i][1];
+    var c = points[i][2];
+    outlet(1, y, x, c);  // Send each point as an 'xyz' message.
+  }
+}
+
 function McFunctionTransform(sourceFunction, numChannels) {
   this.sourceFunction = sourceFunction;
   this.numChannels = numChannels;
