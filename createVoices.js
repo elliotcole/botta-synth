@@ -2,13 +2,14 @@ autowatch = 1;
 
 var voices = [];
 var createdObjects = []; // stores *all* created patcher objects
- 
+
 var fundamental = 100;
 var harmonics = [];
 var pans = [];
 var mode = 0;
 var totalDuration = 1000;
 var amplitudeLimit = 0.8;  // Default amplitude limit
+var gain = 1;
 
 
 var deferUpdates = 0;
@@ -105,7 +106,7 @@ var outletR = this.patcher.getnamed("outlet_right");
 
 function createVoices(n) {
   if (voices.length != n) { // don't re-create voices if you don't have to
-    post("re-building synth with " + n + " voices");
+    post("re-building synth with " + n + " voices\n");
     clearVoices();
 
     // Reset sustain values when the number of voices changes
@@ -224,9 +225,11 @@ function envelope() {
 
   // If this is the last voice, start processing
   if (collectedCurveData.length === voices.length) {
-    collectAllAmplitudes();   // Collect the maximum amplitude for each voice
-    adjustAmplitudes();       // Adjust the amplitudes based on the limit
+    post("last envelope received, beginning processing\n");
 
+    collectAllAmplitudes();   // Collect the maximum amplitude for each voice
+    processEQ();
+    adjustAmplitudes();       // Adjust the amplitudes based on the limit
     processVoices();          // Process each voice with adjusted amplitudes
 
     // Clear for next cycle
@@ -271,15 +274,18 @@ function processVoices() {
       // === Calculate and send panning ===
       var pan = pans[vIndex] || 0;
       var angle = (pan + 1) * 0.25 * Math.PI;
-      v.panL.message("float", Math.cos(angle));
+      v.panL.message("float", Math.cos(angle)); // send pan values
       v.panR.message("float", Math.sin(angle));
 
-      v.env.message("list", processedCurveData);
+      post("sending voice" + vIndex + " curveData " + processedCurveData + "\n");
+
+      v.env.message("list", processedCurveData); // trigger envelope
     } else {
       post("Invalid envelope target for voice", vIndex, "\n");
     }
   }
 }
+
 
 
 // Step 3: Separate lists into y, x, and c components
@@ -306,6 +312,51 @@ function recombineLists(yList, xList, cList) {
   return processedCurveData;
 }
 
+
+// GLOBAL EQ STATE
+var eqCurve = [];    // filled by set_eq()
+var eqMinFreq = 20;
+var eqMaxFreq = 20000;
+
+// --- HANDLER FOR “set_eq” ------------------
+function set_eq() {
+    eqCurve = arrayfromargs(arguments).map(parseFloat);
+}
+
+// --- APPLY EQ TO YOUR CHANNEL DATA ---------
+function processEQ() {
+    var N = eqCurve.length;
+    if (N === 0) return;  // no curve defined
+
+    // precompute log‐space constants
+    var minLog   = Math.log(eqMinFreq);
+    var maxLog   = Math.log(eqMaxFreq);
+    var logRange = maxLog - minLog;
+
+    // collectedCurveData is your array of flat [y,x,c,y,x,c…] lists
+    collectedCurveData.forEach(function(channelData, vIndex) {
+        // get and clamp this voice’s frequency
+        var f = voices[vIndex].freq;
+        if (f < eqMinFreq)      f = eqMinFreq;
+        else if (f > eqMaxFreq) f = eqMaxFreq;
+
+        // compute log‐bin index
+        var idx = Math.floor((Math.log(f) - minLog) / logRange * N);
+        idx = (idx < 0) ? 0 : (idx >= N ? N-1 : idx);
+
+        // grab the EQ adjustment
+        var adj = eqCurve[idx];
+
+        // multiply it into every y‐value (every 3rd element starting at 0)
+        for (var i = 0; i < channelData.length; i += 3) {
+          channelData[i] = Math.max(0, channelData[i] * adj);
+        }
+    });
+}
+
+
+
+
 function adjustAmplitudes() {
   // Step 1: Find the maximum amplitude per channel
   var totalAmplitude = 0;
@@ -330,12 +381,12 @@ function adjustAmplitudes() {
 
     // Step 4: Apply the scale and compensation to the y-values (amplitudes)
     var scaledYList = yList.map(function(value) {
-      return value === 0 ? 0 : value * scale * compensation;  // Scale and apply compensation
+      return value === 0 ? 0 : value * scale * compensation;  // Scale and apply compensation 
     });
 
     // Reassign scaled y-values back into the channelData
     for (var i = 0; i < channelData.length; i += 3) {
-      channelData[i] = scaledYList[i / 3];
+      channelData[i] = scaledYList[i / 3] * gain; // apply master gain control
     }
   });
 
@@ -349,13 +400,15 @@ function anything() {
   switch (messagename) {
     case "limit_amplitude":
       amplitudeLimit = args[0];  // Update the amplitude limit
-      post("Amplitude limit set to: " + amplitudeLimit + "\n");
       return;
     // Handle other messages here if needed
   }
 }
 
-
+function set_gain(val) {
+  gain = val;
+  //post("Gain set to: " + amplitudeLimit + "\n");
+}
 
 function applyTimeScaleToCurveData() {
   var curveData = arrayfromargs(arguments);
@@ -386,7 +439,8 @@ function debug_me() {
   post("Pan: " + pans + "\n");
   post("Voices count: " + voices.length + "\n");
   post("Mode: " + mode + "\n");
-
+  post("EQ: " + eqCurve + "\n");
+  post("Amplitude Limit: " + amplitudeLimit + "\n");
   for (var i = 0; i < voices.length; i++) {
     var v = voices[i];
     post("Voice " + i + " freq: " + v.freq + "\n");
