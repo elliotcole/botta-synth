@@ -2,12 +2,13 @@ autowatch = 1;
 
 var voices = [];
 var createdObjects = []; // stores *all* created patcher objects
-
+ 
 var fundamental = 100;
 var harmonics = [];
 var pans = [];
 var mode = 0;
 var totalDuration = 1000;
+var amplitudeLimit = 0.8;  // Default amplitude limit
 
 
 var deferUpdates = 0;
@@ -223,25 +224,34 @@ function envelope() {
 
   // If this is the last voice, start processing
   if (collectedCurveData.length === voices.length) {
-    //post("All curveData collected. Beginning processing...\n");
+    collectAllAmplitudes();   // Collect the maximum amplitude for each voice
+    adjustAmplitudes();       // Adjust the amplitudes based on the limit
 
-    collectAllSustainValues();
-    processVoices();
+    processVoices();          // Process each voice with adjusted amplitudes
 
     // Clear for next cycle
     collectedCurveData = [];
-    allSustainValues = [];
+    allAmplitudes = [];
   }
 }
 
-// Step 1: Extract all y values for global sustain adjustment
-function collectAllSustainValues() {
+
+// Step 1: Extract all y values for global amplitude adjustment
+function collectAllAmplitudes() {
+  allAmplitudes = [];  // Clear previous values
   collectedCurveData.forEach(function(data) {
+    // Collect only the y-values (amplitudes)
+    var amplitudes = [];
     for (var i = 0; i < data.length; i += 3) {
-      allSustainValues.push(data[i]);
+      amplitudes.push(data[i]);  // Push the y-value (amplitude)
     }
+    // Find the maximum amplitude for the channel and add to allAmplitudes
+    var maxAmplitude = Math.max.apply(null, amplitudes);
+    //post("max amplitude is " + maxAmplitude + "\n");
+    allAmplitudes.push(maxAmplitude);
   });
 }
+
 
 // Step 2: Process each voice
 function processVoices() {
@@ -252,29 +262,25 @@ function processVoices() {
     if (v && v.env && v.env.valid) {
       var separatedLists = separateLists(originalCurveData);
 
-      // Apply transformations
-      var scaledYList = adjustSustain(separatedLists.yList);
+      // No need to adjust the sustain anymore, as it was handled globally
       var scaledXList = applyTimeScaleToCurveData.apply(this, separatedLists.xList);
 
-      // Recombine
-      var processedCurveData = recombineLists(scaledYList, scaledXList, separatedLists.cList);
+      // Recombine (scaledYList is already processed globally)
+      var processedCurveData = recombineLists(separatedLists.yList, scaledXList, separatedLists.cList);
 
       // === Calculate and send panning ===
       var pan = pans[vIndex] || 0;
       var angle = (pan + 1) * 0.25 * Math.PI;
       v.panL.message("float", Math.cos(angle));
       v.panR.message("float", Math.sin(angle));
-      //post("Set panning for voice " + vIndex + ": L=" + Math.cos(angle) + " R=" + Math.sin(angle) + "\n");
 
-      //
       v.env.message("list", processedCurveData);
-      //post("Sent processed curveData to voice " + vIndex + ": " + processedCurveData + "\n");
-
     } else {
       post("Invalid envelope target for voice", vIndex, "\n");
     }
   }
 }
+
 
 // Step 3: Separate lists into y, x, and c components
 function separateLists(originalCurveData) {
@@ -300,32 +306,55 @@ function recombineLists(yList, xList, cList) {
   return processedCurveData;
 }
 
-// adjustSustain function (ES5 compatible)
-function adjustSustain(sustainValues) {
-  var sustainSum = 0;
-  for (var i = 0; i < allSustainValues.length; i++) {
-    sustainSum += allSustainValues[i];
-  }
+function adjustAmplitudes() {
+  // Step 1: Find the maximum amplitude per channel
+  var totalAmplitude = 0;
+  var peakAmplitudes = [];
 
-  var nonzeroValues = [];
-  for (var j = 0; j < allSustainValues.length; j++) {
-    if (allSustainValues[j] > 0) {
-      nonzeroValues.push(allSustainValues[j]);
+  allAmplitudes.forEach(function(maxAmplitude) {
+    peakAmplitudes.push(maxAmplitude);
+    totalAmplitude += maxAmplitude;
+  });
+
+  // Step 2: Calculate scaling factor based on the total amplitude and the amplitude limit
+  var scale = amplitudeLimit / totalAmplitude;  // Proportional scale factor
+
+  // Step 3: Calculate compensation factor for each channel based on its peak amplitude
+  collectedCurveData.forEach(function(channelData, vIndex) {
+    var yList = channelData.filter(function(value, index) {
+      return index % 3 === 0;  // Extract y (amplitude) values
+    });
+
+    var maxPeak = peakAmplitudes[vIndex];  // Get the peak for this channel
+    var compensation = (maxPeak > 0) ? maxPeak / amplitudeLimit : 1;
+
+    // Step 4: Apply the scale and compensation to the y-values (amplitudes)
+    var scaledYList = yList.map(function(value) {
+      return value === 0 ? 0 : value * scale * compensation;  // Scale and apply compensation
+    });
+
+    // Reassign scaled y-values back into the channelData
+    for (var i = 0; i < channelData.length; i += 3) {
+      channelData[i] = scaledYList[i / 3];
     }
-  }
+  });
 
-  var nonzeroCount = nonzeroValues.length;
-  var average = (nonzeroCount > 0) ? sustainSum / nonzeroCount : 0;
-
-  var scale = (sustainSum > 1) ? 1 / sustainSum : 1;
-  var compensation = (average > 0) ? average : 1;
-
-  var adjustedValues = [];
-  for (var k = 0; k < sustainValues.length; k++) {
-    adjustedValues.push(sustainValues[k] === 0 ? 0 : (sustainValues[k] * scale * compensation));
-  }
-  return adjustedValues;
+  //post("Applied scaling with factor " + scale + " and compensation for each channel.\n");
 }
+
+
+
+function anything() {
+  var args = arrayfromargs(arguments);
+  switch (messagename) {
+    case "limit_amplitude":
+      amplitudeLimit = args[0];  // Update the amplitude limit
+      post("Amplitude limit set to: " + amplitudeLimit + "\n");
+      return;
+    // Handle other messages here if needed
+  }
+}
+
 
 
 function applyTimeScaleToCurveData() {

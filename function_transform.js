@@ -85,6 +85,13 @@ McFunctionTransform.prototype.transform = function() {
     var curveScale = self.curves[channelIndex];
     var duration = end - start;
 
+    // Handle the case where x = 0 and y != 0 to avoid popping
+    if (data[0][0] === 0 && data[0][1] !== 0) {
+      // Adjust x to be a very small value near 0, and add a new [0, 0, 0] point
+      data[0][0] = 0.000001;
+      data.unshift([0, 0, 0]);  // Add a new point at [0, 0, 0]
+    }
+
     // Separate endpoints and inner breakpoints
     var fixedStart = data[0];
     var fixedEnd = data[data.length - 1];
@@ -109,9 +116,11 @@ McFunctionTransform.prototype.transform = function() {
     var toggle = 0;
     var prevY = null;
     var adjustedLen = adjusted.length;
+
     for (var i = 0; i < repeated.length; i++) {
       var pt = repeated[i];
       var xVal = pt[0], yVal = pt[1], cVal = pt[2];
+
       // Determine Y scaling: only for non-endpoint segments
       var indexInAdjusted = i % adjustedLen;
       var isEndpoint = (indexInAdjusted === 0 || indexInAdjusted === adjustedLen - 1);
@@ -121,6 +130,7 @@ McFunctionTransform.prototype.transform = function() {
       } else {
         newY = Math.min(1, Math.max(0, yVal + (yScale * yVal)));
       }
+
       // Determine if this segment is flat (same Y as previous)
       var isFlat = (prevY !== null && yVal === prevY);
       var newC;
@@ -133,11 +143,17 @@ McFunctionTransform.prototype.transform = function() {
         newC = Math.max(-1, Math.min(1, newC));
         toggle++;
       }
+
       result.push([xVal, newY, newC]);
       prevY = yVal;
     }
-    return result;  });
+
+    return result;
+  });
 };
+
+
+
 
 McFunctionTransform.prototype.outputTransformed = function() {
   var transformedData = this.transform();
@@ -171,13 +187,16 @@ var numberOfChannels = 0;
 var currentChannelIndex = -1;
 var pendingChannelData = [];
 var transformer = null;
+ 
 
 function chans(n) {
   // Adjust channel count and pending data
   numberOfChannels = n;
-  currentChannelIndex = -1;
-  pendingChannelData = [];
-  for (var i = 0; i < n; i++) pendingChannelData.push([]);
+  currentChannelIndex = -1;  // Reset to -1 to indicate no channel selected
+  pendingChannelData = [];  // Clear the existing data
+  for (var i = 0; i < n; i++) {
+    pendingChannelData.push([]);  // Initialize an empty array for each channel
+  }
   // Resize existing transformation arrays
   if (transformer) {
     transformer.startPoints = resizeArray(transformer.startPoints, n, 0);
@@ -190,34 +209,58 @@ function chans(n) {
   }
 }
 
+
 function anything() {
   var args = arrayfromargs(arguments);
   switch (messagename) {
-    case "chans": chans.apply(this, args); return;
+    case "chans":
+      chans.apply(this, args);
+      return;
     case "clear":
       pendingChannelData = [];
-      for (var i = 0; i < numberOfChannels; i++) pendingChannelData.push([]);
+      for (var i = 0; i < numberOfChannels; i++) {
+        pendingChannelData.push([]);
+      }
       currentChannelIndex = -1;
       return;
     case "chan":
       var chanNum = args[0];
       if (chanNum === 1) {
         pendingChannelData = [];
-        for (var i = 0; i < numberOfChannels; i++) pendingChannelData.push([]);
+        for (var i = 0; i < numberOfChannels; i++) {
+          pendingChannelData.push([]);
+        }
       }
-      currentChannelIndex = chanNum - 1;
+      // Ensure valid channel index
+      currentChannelIndex = (chanNum > 0 && chanNum <= numberOfChannels) ? (chanNum - 1) : -1;
       return;
-    case "done": done(); return;
-    case "start": start.apply(this, args); return;
-    case "end": end.apply(this, args); return;
-    case "repetitions": repetitions.apply(this, args); return;
-    case "scale": scale.apply(this, args); return;
-    case "curves": curves.apply(this, args); return;
+    case "done":
+      done();
+      return;
+    case "start":
+      start.apply(this, args);
+      return;
+    case "end":
+      end.apply(this, args);
+      return;
+    case "repetitions":
+      repetitions.apply(this, args);
+      return;
+    case "scale":
+      scale.apply(this, args);
+      return;
+    case "curves":
+      curves.apply(this, args);
+      return;
   }
-  if (currentChannelIndex >= 0 && args.length === 3) {
+
+  if (currentChannelIndex >= 0 && currentChannelIndex < numberOfChannels && args.length === 3) {
     pendingChannelData[currentChannelIndex].push([args[0], args[1], args[2]]);
+  } else {
+    post("ERROR: Invalid channel index or data format.\n");
   }
 }
+
 
 function done() {
   // post("done() called\n");
