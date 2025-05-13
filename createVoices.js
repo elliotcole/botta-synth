@@ -29,15 +29,34 @@ function set_rand(r) {
   }
 }
 
-var randAmount = 1;
+var randAmount = 0;
 
-function set_rand_amount(a) {
-  randAmount = Math.max(0, Math.min(1, a));
-  var cleanAmt = 1 - randAmount;
-  voices.forEach(function(v){
-    v.cleanSig.message("float", cleanAmt);
-    v.dirtySig.message("float", randAmount);
-  });
+// set_rand_amount v1 v2 v3 … vn
+// where n = voices.length
+function set_rand_amount() {
+    var vals = arrayfromargs(arguments);
+    var numVoices = voices.length;
+
+    // If you only passed one value, broadcast it to all voices:
+    if (vals.length === 1) {
+        var a = Math.max(0, Math.min(1, vals[0]));
+        for (var i = 0; i < numVoices; i++) {
+            voices[i].cleanSig.message("float", 1 - a);
+            voices[i].dirtySig.message("float",     a);
+        }
+    }
+    // If you passed exactly as many values as voices, use them one-to-one:
+    else if (vals.length === numVoices) {
+        for (var i = 0; i < numVoices; i++) {
+            var amt = Math.max(0, Math.min(1, vals[i]));
+            voices[i].cleanSig.message("float", 1 - amt);
+            voices[i].dirtySig.message("float",     amt);
+        }
+    }
+    else {
+        post("set_rand_amount: expected 1 or " + numVoices +
+             " args, got " + vals.length + "\n");
+    }
 }
 
 
