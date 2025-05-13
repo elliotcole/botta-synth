@@ -19,26 +19,27 @@ var deferredParams = {
   frequencies: null,
 };
 
-function hard_reset() { // does not work
-  var patcher = this.patcher;
-  var path = patcher.filepath;
+var randRate    = 100;  // your existing default
+var randAmount  = 0;
 
-  post("resetting " + patcher + "\n");
-  post("loading from " + path + "\n");
-  if (path) {
-      post("Reloading abstraction from: " + path + "\n");
-
-      // This sends an "open" message to force a refresh
-      patcher.parentpatcher.message("script", "sendbox", patcher.varname, "open", path);
-
-      // Close it immediately (it will still be reloaded)
-      patcher.parentpatcher.message("script", "sendbox", patcher.varname, "close");
-  } else {
-      post("Failed to reload: abstraction not saved to disk.\n");
+function set_rand(r) {
+  randRate = r;
+  for (var i = 0; i < voices.length; i++) {
+      voices[i].rand.message("float", randRate);
   }
-
-
 }
+
+var randAmount = 1;
+
+function set_rand_amount(a) {
+  randAmount = Math.max(0, Math.min(1, a));
+  var cleanAmt = 1 - randAmount;
+  voices.forEach(function(v){
+    v.cleanSig.message("float", cleanAmt);
+    v.dirtySig.message("float", randAmount);
+  });
+}
+
 
 function set_defer(val) {
   deferUpdates = val;
@@ -105,103 +106,132 @@ var outletL = this.patcher.getnamed("outlet_left");
 var outletR = this.patcher.getnamed("outlet_right");
 
 function createVoices(n) {
-  if (voices.length != n) { // don't re-create voices if you don't have to
-    post("re-building synth with " + n + " voices\n");
-    clearVoices();
+    if (voices.length !== n) {
+        post("re-building synth with " + n + " voices\n");
+        clearVoices();
+        allSustainValues = [];
 
-    // Reset sustain values when the number of voices changes
-    allSustainValues = [];
+        var x = 50, y = 50, spacing = 200;
+        var sumL = null, sumR = null;
+        var completionCounter = 0, completionTriggers = [];
 
-    var x = 50;
-    var y = 50;
-    var spacing = 200;
+        for (var i = 0; i < n; i++) {
+            var freq = fundamental * (harmonics[i] || 1);
 
-    var sumL = null;
-    var sumR = null;
+            // — cycle~ oscillator
+            var cycle = this.patcher.newdefault(x+60, y, "cycle~", freq);
+            createdObjects.push(cycle);
 
-    // Counter to track curve~ completions
-    var completionCounter = 0;
-    var completionTriggers = [];
+            // — rand~ noise source
+            var rand = this.patcher.newdefault(x+60, y+20, "rand~", randRate);
+            createdObjects.push(rand);
 
-    for (var i = 0; i < n; i++) {
-      var freq = fundamental * (harmonics[i] || 1);
+            // — dirty = cycle~ * rand~
+            var randGain = this.patcher.newdefault(x+60, y+40, "*~");
+            createdObjects.push(randGain);
+            this.patcher.connect(cycle, 0, randGain, 0);
+            this.patcher.connect(rand,   0, randGain, 1);
 
-      var cycle = this.patcher.newdefault(x + 60, y, "cycle~", freq);
-      var gain = this.patcher.newdefault(x + 60, y + 40, "*~");
-      var env = this.patcher.newdefault(x + 200, y, "curve~");
-      var panL = this.patcher.newdefault(x + 60, y + 80, "*~");
-      var panR = this.patcher.newdefault(x + 360, y + 80, "*~");
+            // — crossfade signals via sig~
+            var cleanSig = this.patcher.newdefault(x+40, y+60, "sig~", 1 - randAmount);
+            var dirtySig = this.patcher.newdefault(x+40, y+80, "sig~",     randAmount);
+            createdObjects.push(cleanSig, dirtySig);
 
-      createdObjects.push(cycle, gain, env, panL, panR);
+            // — *~ objects for crossfade
+            var fadeClean = this.patcher.newdefault(x+60, y+60, "*~");
+            var fadeDirty = this.patcher.newdefault(x+60, y+80, "*~");
+            var sumFade   = this.patcher.newdefault(x+60, y+100,"+~");
+            createdObjects.push(fadeClean, fadeDirty, sumFade);
 
-      this.patcher.connect(cycle, 0, gain, 0);
-      this.patcher.connect(env, 0, gain, 1);
-      this.patcher.connect(gain, 0, panL, 0);
-      this.patcher.connect(gain, 0, panR, 0);
+            // wire crossfade:
+            this.patcher.connect(cycle,    0, fadeClean, 0);
+            this.patcher.connect(cleanSig, 0, fadeClean, 1);
+            this.patcher.connect(fadeClean,0, sumFade,   0);
 
-      // Track the number of curve~ objects
-      completionCounter++;
+            this.patcher.connect(randGain, 0, fadeDirty, 0);
+            this.patcher.connect(dirtySig, 0, fadeDirty, 1);
+            this.patcher.connect(fadeDirty,0, sumFade,   1);
 
-      // Create trigger for each curve~ completion
-      var completionTrigger = this.patcher.newdefault(x + 240, y + 20, "t", "bang");
-      createdObjects.push(completionTrigger);
-      this.patcher.connect(env, 1, completionTrigger, 0);
+            // — envelope (curve~) & multiply
+            var env = this.patcher.newdefault(x+200, y, "curve~");
+            createdObjects.push(env);
 
-      // Store the trigger for later
-      completionTriggers.push(completionTrigger);
+            var envMul = this.patcher.newdefault(x+200, y+60, "*~");
+            createdObjects.push(envMul);
+            this.patcher.connect(sumFade, 0, envMul, 0);
+            this.patcher.connect(env,     0, envMul, 1);
 
-      if (sumL === null) {
-        sumL = panL;
-      } else {
-        var newSumL = this.patcher.newdefault(x + 5, y + 150, "+~");
-        this.patcher.connect(sumL, 0, newSumL, 0);
-        this.patcher.connect(panL, 0, newSumL, 1);
-        createdObjects.push(newSumL);
-        sumL = newSumL;
-      }
+            // — pan left/right
+            var panL = this.patcher.newdefault(x+60,  y+140, "*~");
+            var panR = this.patcher.newdefault(x+360, y+140, "*~");
+            createdObjects.push(panL, panR);
+            this.patcher.connect(envMul, 0, panL, 0);
+            this.patcher.connect(envMul, 0, panR, 0);
 
-      if (sumR === null) {
-        sumR = panR;
-      } else {
-        var newSumR = this.patcher.newdefault(x + 360, y + 150, "+~");
-        this.patcher.connect(sumR, 0, newSumR, 0);
-        this.patcher.connect(panR, 0, newSumR, 1);
-        createdObjects.push(newSumR);
-        sumR = newSumR;
-      }
+            // — track curve~ completions
+            completionCounter++;
+            var completionTrigger = this.patcher.newdefault(x+240, y+20, "t", "bang");
+            createdObjects.push(completionTrigger);
+            this.patcher.connect(env, 1, completionTrigger, 0);
+            completionTriggers.push(completionTrigger);
 
-      voices.push({
-        cycle: cycle,
-        gain: gain,
-        env: env,
-        panL: panL,
-        panR: panR,
-        freq: freq
-      });
+            // — accumulate sums for L/R
+            if (sumL === null) {
+                sumL = panL;
+            } else {
+                var newSumL = this.patcher.newdefault(x+5, y+180, "+~");
+                createdObjects.push(newSumL);
+                this.patcher.connect(sumL,  0, newSumL, 0);
+                this.patcher.connect(panL,  0, newSumL, 1);
+                sumL = newSumL;
+            }
+            if (sumR === null) {
+                sumR = panR;
+            } else {
+                var newSumR = this.patcher.newdefault(x+360, y+180, "+~");
+                createdObjects.push(newSumR);
+                this.patcher.connect(sumR,  0, newSumR, 0);
+                this.patcher.connect(panR,  0, newSumR, 1);
+                sumR = newSumR;
+            }
 
-      y += spacing;
+            // — store for later control
+            voices.push({
+                cycle:    cycle,
+                rand:     rand,
+                randGain: randGain,
+                cleanSig: cleanSig,
+                dirtySig: dirtySig,
+                fadeClean:fadeClean,
+                fadeDirty:fadeDirty,
+                sumFade:  sumFade,
+                env:      env,
+                envMul:   envMul,
+                panL:     panL,
+                panR:     panR,
+                freq:     freq
+            });
 
+            y += spacing;
+        }
+
+        // — connect final sums to your outlets
+        if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
+        if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
+
+        // — build the uzi & bang_when_complete
+        var uzi = this.patcher.newdefault(x+180, y+400, "uzi", completionCounter);
+        createdObjects.push(uzi);
+        for (var j = 0; j < completionTriggers.length; j++) {
+            this.patcher.connect(completionTriggers[j], 0, uzi, 0);
+        }
+        var bangOutlet = this.patcher.getnamed("bang_when_complete");
+        if (bangOutlet) {
+            this.patcher.connect(uzi, 0, bangOutlet, 0);
+        }
     }
-
-    if (sumL) this.patcher.connect(sumL, 0, outletL, 0);
-    if (sumR) this.patcher.connect(sumR, 0, outletR, 0);
-
-    // Create a [uzi] object to collect bangs from all curve~ objects
-    var uzi = this.patcher.newdefault(x + 180, y + 400, "uzi", completionCounter);
-    createdObjects.push(uzi);
-
-    // Connect each trigger to uzi
-    for (var j = 0; j < completionTriggers.length; j++) {
-      this.patcher.connect(completionTriggers[j], 0, uzi, 0);
-    }
-
-    // Connect the final bang to the named outlet "bang_when_complete"
-    var bangOutlet = this.patcher.getnamed("bang_when_complete");
-    if (bangOutlet) {
-      this.patcher.connect(uzi, 0, bangOutlet, 0);
-    }
-  }
 }
+
 
 
 
@@ -277,7 +307,7 @@ function processVoices() {
       v.panL.message("float", Math.cos(angle)); // send pan values
       v.panR.message("float", Math.sin(angle));
 
-      post("sending voice" + vIndex + " curveData " + processedCurveData + "\n");
+      //post("sending voice" + vIndex + " curveData " + processedCurveData + "\n");
 
       v.env.message("list", processedCurveData); // trigger envelope
     } else {
@@ -381,7 +411,7 @@ function adjustAmplitudes() {
 
     // Step 4: Apply the scale and compensation to the y-values (amplitudes)
     var scaledYList = yList.map(function(value) {
-      return value === 0 ? 0 : value * scale * compensation;  // Scale and apply compensation 
+      return value === 0 ? 0 : value * scale * compensation;  // Scale and apply compensation
     });
 
     // Reassign scaled y-values back into the channelData
