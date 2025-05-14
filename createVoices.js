@@ -12,13 +12,6 @@ var amplitudeLimit = 0.8;  // Default amplitude limit
 var gain = 1;
 
 
-var deferUpdates = 0;
-var deferredParams = {
-  fundamental: null,
-  harmonics: null,
-  frequencies: null,
-};
-
 var randRate    = 100;  // your existing default
 var randAmount  = 0;
 
@@ -60,10 +53,6 @@ function set_rand_amount() {
 }
 
 
-function set_defer(val) {
-  deferUpdates = val;
-}
-
 function set_mode(val) {
   mode = val;
 }
@@ -71,43 +60,34 @@ function set_mode(val) {
 function pan() { pans = arrayfromargs(arguments); }
 
 function set_fundamental(val) {
-  if (deferUpdates) {
-    deferredParams.fundamental = val;
-  } else {
-    fundamental = val;
-    if (mode == 0) {
-      updateFrequenciesFromHarmonics();
-    }
-  }
-}
-
-function set_harmonics() {
-  if (deferUpdates) {
-    deferredParams.harmonics = arrayfromargs(arguments);
-  } else {
-    harmonics = arrayfromargs(arguments);
+  fundamental = val;
+  if (mode == 0) {
     updateFrequenciesFromHarmonics();
   }
 }
 
+function set_harmonics() {
+  harmonics = arrayfromargs(arguments);
+  updateFrequenciesFromHarmonics();
+  //post("setting harmonics to " + harmonics + "\n");
+} 
+
 function set_frequencies() { // mode 2 - sets freqs directly
-  if (deferUpdates) {
-    deferredParams.frequencies = arrayfromargs(arguments);
-  } else {
-    var frequencies = arrayfromargs(arguments);
-    for (var i = 0; i < voices.length; i++) {
-      var freq = frequencies[i] || 440;
-      voices[i].freq = freq;
-      voices[i].cycle.message("frequency", freq);
-    }
+  var frequencies = arrayfromargs(arguments);
+  for (var i = 0; i < voices.length; i++) {
+    var freq = frequencies[i] || 440;
+    voices[i].freq = freq;
+    voices[i].cycle.message("frequency", freq);
   }
 }
+
 
 function updateFrequenciesFromHarmonics() {
   for (var i = 0; i < voices.length; i++) {
     var freq = fundamental * (harmonics[i] || 1);
     voices[i].freq = freq;
     voices[i].cycle.message("frequency", freq);
+    post("voice", i, "freq", freq, "\n");
   }
 }
 
@@ -274,7 +254,7 @@ function envelope() {
 
   // If this is the last voice, start processing
   if (collectedCurveData.length === voices.length) {
-    post("last envelope received, beginning processing\n");
+    //post("last envelope received, beginning processing\n");
 
     collectAllAmplitudes();   // Collect the maximum amplitude for each voice
     processEQ();

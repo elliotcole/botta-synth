@@ -2,12 +2,15 @@
 // JavaScript logic for transforming multi-channel mc.function data in Max/MSP
 
 inlets = 1;
-outlets = 1;
+outlets = 3;
 
 var displayChannel = 1;
+var currentlyEditedChannel = -1;
+
 
 function display_chan(n) {
   displayChannel = n;
+  currently_edited_channel(n);
   outlet(0, ["displaychan"], displayChannel)
 }
 
@@ -17,32 +20,40 @@ function makeFilledArray(length, value) {
   return arr;
 }
 
+function currently_edited_channel(n) {
+  if (n >= 1 && n <= numberOfChannels) {
+    currentlyEditedChannel = n;
+  } else {
+    post("ERROR: Invalid currently edited channel number: " + n + "\n");
+  }
+}
+
 function resizeArray(arr, length, defaultValue) {
   var newArr = arr.slice(0, length);
   while (newArr.length < length) newArr.push(defaultValue);
   return newArr;
 }
 
-function dumpChannel(n) {
-  if (n < 0 || n >= voices.length) {
-    post("ERROR: Invalid channel index.\n");
-    return;
-  }
+// function dumpChannel(n) {
+//   if (n < 0 || n >= voices.length) {
+//     post("ERROR: Invalid channel index.\n");
+//     return;
+//   }
 
-  var channelData = voices[n];  // Assuming the voice data is structured this way.
-  if (!channelData || !channelData.curveData) {
-    post("ERROR: No data available for channel " + n + ".\n");
-    return;
-  }
+//   var channelData = voices[n];  // Assuming the voice data is structured this way.
+//   if (!channelData || !channelData.curveData) {
+//     post("ERROR: No data available for channel " + n + ".\n");
+//     return;
+//   }
 
-  var points = channelData.curveData;  // Array of [y, x, c] for the channel.
-  for (var i = 0; i < points.length; i++) {
-    var y = points[i][0];
-    var x = points[i][1];
-    var c = points[i][2];
-    outlet(1, y, x, c);  // Send each point as an 'xyz' message.
-  }
-}
+//   var points = channelData.curveData;  // Array of [y, x, c] for the channel.
+//   for (var i = 0; i < points.length; i++) {
+//     var y = points[i][0];
+//     var x = points[i][1];
+//     var c = points[i][2];
+//     outlet(1, y, x, c);  // Send each point as an 'xyz' message.
+//   }
+// }
 
 function McFunctionTransform(sourceFunction, numChannels) {
   this.sourceFunction = sourceFunction;
@@ -176,6 +187,7 @@ McFunctionTransform.prototype.debug = function() {
   post("Y Scales: " + this.scales + "\n");
   post("Curve Adjustments: " + this.curves + "\n");
   post("Source Function:\n");
+  post("Currently Edited Channel" + currentlyEditedChannel + "\n");
   this.sourceFunction.forEach(function(chData, idx) {
     post(" Channel " + idx + ": " + JSON.stringify(chData) + "\n");
   });
@@ -260,6 +272,46 @@ function anything() {
     post("ERROR: Invalid channel index or data format.\n");
   }
 }
+
+
+function send_active_channel_to_all_channels() {
+  var currentlyEditedChannelBaseZero = currentlyEditedChannel - 1;
+  var channel_data_to_copy = transformer.sourceFunction[currentlyEditedChannelBaseZero].slice();
+
+  if (!transformer) {
+      post("ERROR: Transformer is not defined.\n");
+      return;
+    }
+
+    if (!transformer.sourceFunction || !Array.isArray(transformer.sourceFunction)) {
+      post("ERROR: transformer.sourceFunction is missing or invalid.\n");
+      return;
+    }
+
+    if (currentlyEditedChannelBaseZero < 0 || currentlyEditedChannelBaseZero >= transformer.sourceFunction.length) {
+      post("ERROR: currentlyEditedChannel (" + currentlyEditedChannel + ") is invalid.\n");
+      return;
+    }
+
+    var data = transformer.sourceFunction[currentlyEditedChannelBaseZero];
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      post("ERROR: No data to copy from channel " + (currentlyEditedChannel + 1) + "\n");
+      return;
+    }
+
+  // Save for later if needed
+  channel_data_to_copy = data.slice();  // shallow copy
+
+  for (var i = 0; i < numberOfChannels; i++) {
+    outlet(1, ["clearchans, i"]);
+    for (var j = 0; j < channel_data_to_copy.length; j++) {
+      var pt = channel_data_to_copy[j];
+      outlet(1, ["xyc", pt[0], pt[1], pt[2]]);
+      outlet(2, i + 1);  // 1-based channel index
+    }
+  }
+}
+
 
 
 function done() {
