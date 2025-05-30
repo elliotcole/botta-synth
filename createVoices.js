@@ -87,7 +87,7 @@ function updateFrequenciesFromHarmonics() {
     var freq = fundamental * (harmonics[i] || 1);
     voices[i].freq = freq;
     voices[i].cycle.message("frequency", freq);
-    post("voice", i, "freq", freq, "\n");
+    //post("voice", i, "freq", freq, "\n");
   }
 }
 
@@ -106,7 +106,7 @@ var outletR = this.patcher.getnamed("outlet_right");
 
 function createVoices(n) {
     if (voices.length !== n) {
-        post("re-building synth with " + n + " voices\n");
+        //post("re-building synth with " + n + " voices\n");
         clearVoices();
         allSustainValues = [];
 
@@ -472,6 +472,6 @@ function debug_me() {
   post("Amplitude Limit: " + amplitudeLimit + "\n");
   for (var i = 0; i < voices.length; i++) {
     var v = voices[i];
-    post("Voice " + i + " freq: " + v.freq + "\n");
+    //post("Voice " + i + " freq: " + v.freq + "\n");
   }
 }
