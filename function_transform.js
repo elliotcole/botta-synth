@@ -275,42 +275,60 @@ function anything() {
 
 
 function send_active_channel_to_all_channels() {
-  var currentlyEditedChannelBaseZero = currentlyEditedChannel - 1;
-  var channel_data_to_copy = transformer.sourceFunction[currentlyEditedChannelBaseZero].slice();
-
   if (!transformer) {
-      post("ERROR: Transformer is not defined.\n");
-      return;
-    }
+    post("ERROR: Transformer is not defined.\n");
+    return;
+  }
 
-    if (!transformer.sourceFunction || !Array.isArray(transformer.sourceFunction)) {
-      post("ERROR: transformer.sourceFunction is missing or invalid.\n");
-      return;
-    }
+  if (!transformer.sourceFunction || !Array.isArray(transformer.sourceFunction)) {
+    post("ERROR: transformer.sourceFunction is missing or invalid.\n");
+    return;
+  }
 
-    if (currentlyEditedChannelBaseZero < 0 || currentlyEditedChannelBaseZero >= transformer.sourceFunction.length) {
-      post("ERROR: currentlyEditedChannel (" + currentlyEditedChannel + ") is invalid.\n");
-      return;
-    }
+  var sourceIndex = currentlyEditedChannel - 1;
 
-    var data = transformer.sourceFunction[currentlyEditedChannelBaseZero];
-    if (!data || !Array.isArray(data) || data.length === 0) {
-      post("ERROR: No data to copy from channel " + (currentlyEditedChannel + 1) + "\n");
-      return;
-    }
+  if (sourceIndex < 0 || sourceIndex >= transformer.sourceFunction.length) {
+    post("ERROR: currentlyEditedChannel (" + currentlyEditedChannel + ") is invalid.\n");
+    return;
+  }
 
-  // Save for later if needed
-  channel_data_to_copy = data.slice();  // shallow copy
+  var sourceData = transformer.sourceFunction[sourceIndex];
+  if (!Array.isArray(sourceData) || sourceData.length === 0) {
+    post("ERROR: Source channel has no valid data.\n");
+    return;
+  }
 
+  // Make a defensive copy of the data
+  var savedPoints = sourceData.map(function (pt) {
+    return [pt[0], pt[1], pt[2]];
+  });
+
+  // Debug: Show copied points
+  post("Copied points:\n");
+  for (var i = 0; i < savedPoints.length; i++) {
+    var pt = savedPoints[i];
+    post("[" + pt[0] + ", " + pt[1] + ", " + pt[2] + "]\n");
+  }
+
+  // Step 2: Clear all channels
   for (var i = 0; i < numberOfChannels; i++) {
-    outlet(1, ["clearchans, i"]);
-    for (var j = 0; j < channel_data_to_copy.length; j++) {
-      var pt = channel_data_to_copy[j];
+    var chan = i + 1;
+    outlet(1, ["clearchans", chan]);
+    post("clearchans, " + chan + "\n");
+  }
+
+  // Step 3: Write saved data to all channels
+  for (var i = 0; i < numberOfChannels; i++) {
+    var chan = i + 1;
+    for (var j = 0; j < savedPoints.length; j++) {
+      var pt = savedPoints[j];
       outlet(1, ["xyc", pt[0], pt[1], pt[2]]);
-      outlet(2, i + 1);  // 1-based channel index
+      outlet(2, chan);
+      post("→ Writing to channel " + chan + ": [" + pt[0] + ", " + pt[1] + ", " + pt[2] + "]\n");
     }
   }
 }
+
 
 
 

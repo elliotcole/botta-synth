@@ -1,58 +1,68 @@
 autowatch = 1;
+inlets = 1;
+outlets = 2;
 
 var harmonics = [];
-var trueHarmonics = []; // stores unclamped harmonic values
-var lastVal = 0; // stores previous scalar value for direction detection
+var lastVal = 0;
 var minVal = 1;
 var maxVal = 50;
+
+// === Set Slider Range ===
+function setminmax() {
+    var minmax = arrayfromargs(arguments);
+    minVal = minmax[0];
+    maxVal = minmax[1];
+}
+
+// === Output with Range Check ===
+function enforceRangeAndOutput() {
+    if (harmonics.length === 0) return;
+
+    var minH = Math.min.apply(null, harmonics);
+    var maxH = Math.max.apply(null, harmonics);
+
+    if (minH < minVal || maxH > maxVal) {
+        outlet(1, [Math.min(minH, minVal), Math.max(maxH, maxVal)]);
+    }
+
+	outlet(0, ["list"].concat(harmonics));
+}
+
+// === Resize based on max value ===
+function resizeToFit() {
+    if (harmonics.length === 0) return;
+
+    var maxH = Math.max.apply(null, harmonics);
+    outlet(1, [minVal, maxH]);
+}
 
 // === Harmonic Setters ===
 function set_harmonics() {
     harmonics = arrayfromargs(arguments);
-    trueHarmonics = harmonics.slice(); // sync true values initially
+	post("harmonics: " + harmonics + "\n");
 }
 
-function outputHarmonics() {
-    outlet(0, harmonics);
-}
-
-// === Direction-Aware Increment (Clamped Output, Floating Logic)
+// === Direction-Aware Increment ===
 function incrementHarmonics(val) {
     var delta = val - lastVal;
     lastVal = val;
 
-    if (delta === 0 || trueHarmonics.length === 0) return;
+    if (delta === 0 || harmonics.length === 0) return;
 
     var shift = delta > 0 ? 1 : -1;
 
-    // Check if any harmonic has hit the max (only matters when increasing)
-    var atCeiling = false;
-    for (var i = 0; i < trueHarmonics.length; i++) {
-        if (harmonics[i] >= maxVal) {
-            atCeiling = true;
-            break;
-        }
+    for (var i = 0; i < harmonics.length; i++) {
+        harmonics[i] += shift;
     }
 
-    for (var i = 0; i < trueHarmonics.length; i++) {
-        // If increasing and ceiling reached, freeze internal state
-        if (shift > 0 && atCeiling) {
-            // Do not update trueHarmonics
-        } else {
-            trueHarmonics[i] += shift;
-        }
-
-        // Clamp output for harmonics[]
-        harmonics[i] = Math.max(minVal, Math.min(maxVal, trueHarmonics[i]));
-    }
-
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
+
+
 // === Reverse ===
 function reverse() {
     harmonics.reverse();
-    trueHarmonics.reverse();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 // === Rotate ===
@@ -61,38 +71,33 @@ function rotate(n) {
     if (isNaN(n) || harmonics.length === 0) return;
 
     var len = harmonics.length;
-    var rot = ((n % len) + len) % len; // wrap properly for negatives
+    var rot = ((n % len) + len) % len;
 
     function rotateArray(arr) {
         return arr.slice(-rot).concat(arr.slice(0, -rot));
     }
 
     harmonics = rotateArray(harmonics);
-    trueHarmonics = rotateArray(trueHarmonics);
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
-// === Odds / Evens Generators ===
+// === Odds / Evens ===
 function odds(len) {
     len = Math.max(1, parseInt(len || harmonics.length || 8));
-    var list = [];
+    harmonics = [];
     for (var i = 0; i < len; i++) {
-        list.push(2 * i + 1);
+        harmonics.push(2 * i + 1);
     }
-    harmonics = list;
-    trueHarmonics = list.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 function evens(len) {
     len = Math.max(1, parseInt(len || harmonics.length || 8));
-    var list = [];
+    harmonics = [];
     for (var i = 0; i < len; i++) {
-        list.push(2 * (i + 1));
+        harmonics.push(2 * (i + 1));
     }
-    harmonics = list;
-    trueHarmonics = list.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 // === Nearest Odds ===
@@ -108,13 +113,12 @@ function nearestOdds() {
     }
 
     harmonics = result;
-    trueHarmonics = result.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 // === Nearest Primes ===
 var PRIME_LIST = [
-    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+    1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
     73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151,
     157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233,
     239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313, 317,
@@ -126,6 +130,15 @@ var PRIME_LIST = [
     821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911,
     919, 929, 937, 941, 947, 953, 967, 971, 977, 983, 991, 997
 ];
+
+function primes() {
+    var n = harmonics.length;
+	post("harmonics length " + n + "\n");
+	var needed_primes = PRIME_LIST.slice(0, n);
+	post("selecting primes " + needed_primes + "\n");
+    harmonics = needed_primes;
+    enforceRangeAndOutput();
+}
 
 function nearestPrime(n) {
     var closest = PRIME_LIST[0];
@@ -153,8 +166,7 @@ function nearestPrimes() {
     }
 
     harmonics = result;
-    trueHarmonics = result.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 // === Halve Evens ===
@@ -167,20 +179,15 @@ function halveEvens() {
     }
 
     harmonics = result;
-    trueHarmonics = result.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
 
 // === Harmonic Series ===
 function harmonicSeries(len) {
     len = Math.max(1, parseInt(len || harmonics.length || 8));
-    var result = [];
-
+    harmonics = [];
     for (var i = 0; i < len; i++) {
-        result.push(i + 1);
+        harmonics.push(i + 1);
     }
-
-    harmonics = result;
-    trueHarmonics = result.slice();
-    outputHarmonics();
+    enforceRangeAndOutput();
 }
