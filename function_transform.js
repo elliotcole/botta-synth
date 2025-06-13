@@ -139,7 +139,7 @@ McFunctionTransform.prototype.transform = function() {
       if (isEndpoint) {
         newY = yVal; // preserve original endpoint Y
       } else {
-        newY = Math.min(1, Math.max(0, yVal + (yScale * yVal)));
+        newY = Math.min(1, Math.max(0, yScale * yVal));
       }
 
       // Determine if this segment is flat (same Y as previous)
